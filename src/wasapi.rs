@@ -5,6 +5,11 @@ use std::sync::Arc;
 pub fn start_wasapi(ring: Arc<AudioRing>, sample_rate: u32, channels: u16) -> anyhow::Result<()> {
     let host = cpal::default_host();
     let device = host.default_output_device().unwrap();
+    println!("Device: {:?}", device.name());
+
+    for supported in device.supported_output_configs().unwrap() {
+        println!("{:?}", supported);
+    }
 
     let config = cpal::StreamConfig {
         channels,
@@ -16,20 +21,16 @@ pub fn start_wasapi(ring: Arc<AudioRing>, sample_rate: u32, channels: u16) -> an
         &config,
         move |data: &mut [f32], _| {
             let mut offset = 0;
-
             while offset < data.len() {
-                match ring.pop() {
-                    Some(buf) => {
-                        let n = buf.len().min(data.len() - offset);
-                        data[offset..offset + n].copy_from_slice(&buf[..n]);
-                        offset += n;
+                if let Some(buf) = ring.pop() {
+                    let n = buf.len().min(data.len() - offset);
+                    data[offset..offset + n].copy_from_slice(&buf[..n]);
+                    offset += n;
+                } else {
+                    for x in &mut data[offset..] {
+                        *x = 0.0;
                     }
-                    None => {
-                        for x in &mut data[offset..] {
-                            *x = 0.0;
-                        }
-                        break;
-                    }
+                    break;
                 }
             }
         },
