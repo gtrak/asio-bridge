@@ -1,4 +1,5 @@
-use crate::{visualizer, AudioRing};
+use crate::util::*;
+use crate::{ring::FrameRingProducer, visualizer};
 use asio_sys::{
     asio_import::{
         ASIOBufferInfo, ASIOCallbacks, ASIOChannelInfo, ASIOCreateBuffers, ASIODriverInfo,
@@ -9,7 +10,7 @@ use asio_sys::{
 };
 use std::{ptr, sync::Arc};
 
-static mut RING: Option<Arc<AudioRing>> = None;
+static mut RING: Option<FrameRingProducer> = None;
 static mut BUFFER_SIZE: usize = 0;
 static mut CHANNELS: usize = 0;
 static mut ASIO_BUFFERS: *mut ASIOBufferInfo = std::ptr::null_mut();
@@ -22,33 +23,6 @@ pub fn set_visualizer(visualizer: Arc<visualizer::AudioVisualizer>) {
         VISUALIZER = Some(visualizer);
     }
 }
-/*
-unsafe extern "C" fn buffer_switch(double_buffer_index: i32, _direct: i32) {
-    let ring = RING.as_ref().unwrap();
-
-    let frames = BUFFER_SIZE;
-    let chans = CHANNELS;
-
-    let mut out = vec![0.0f32; frames * chans];
-
-    for ch in 0..chans {
-        let buf_info = &*ASIO_BUFFERS.add(ch); // first 'ins' entries are inputs
-        let buffer_ptr = buf_info.buffers[double_buffer_index as usize] as *const f32;
-        if !buffer_ptr.is_null() {
-            let src = std::slice::from_raw_parts(buffer_ptr, frames);
-            for i in 0..frames {
-                out[i * chans + ch] = src[i];
-            }
-        }
-    }
-
-    let amplitude = calculate_rms(&out);
-    ring.push(out);
-
-    if let Some(ref visualizer) = VISUALIZER {
-        visualizer.update_amplitude(amplitude);
-    }
-} */
 
 use std::slice;
 
@@ -94,7 +68,7 @@ impl From<i32> for AsioSampleType {
 }
 
 unsafe extern "C" fn buffer_switch(double_buffer_index: i32, _direct: i32) {
-    let ring = RING.as_ref().unwrap();
+    let ring = RING.as_mut().unwrap();
     let frames = BUFFER_SIZE;
     let chans = CHANNELS;
     let mut out = vec![0.0f32; frames * chans];
@@ -145,7 +119,7 @@ unsafe extern "C" fn buffer_switch(double_buffer_index: i32, _direct: i32) {
 
     // Push interleaved f32 buffer to ring
     let amplitude = calculate_rms(&out);
-    ring.push(out);
+    ring.push(&out);
 
     if let Some(ref visualizer) = VISUALIZER {
         visualizer.update_amplitude(amplitude);
@@ -188,7 +162,7 @@ static mut CALLBACKS: ASIOCallbacks = ASIOCallbacks {
     asioMessage: Some(asio_message),
 };
 
-pub unsafe fn start_asio(ring: Arc<AudioRing>) -> anyhow::Result<()> {
+pub unsafe fn start_asio(ring: FrameRingProducer) -> anyhow::Result<()> {
     RING = Some(ring);
 
     // Create AsioDrivers instance to enumerate drivers
